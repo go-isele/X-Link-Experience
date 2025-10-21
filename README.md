@@ -14,6 +14,7 @@ This project demonstrates an Android Jetpack Compose implementation of a “link
 ![Immersive collapsed](docs/screenshots/04-immersive-end.png)
 
 [Demo video](docs/demo/immersive-walkthrough.mp4)
+[Youtube Demo](https://youtube.com/shorts/dAWcQq5WXHs?feature=share)
 
 ## Tech Stack
 - Language: Kotlin (JVM for Android)
