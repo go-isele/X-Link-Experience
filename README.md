@@ -11,7 +11,6 @@ This project demonstrates an Android Jetpack Compose implementation of a “link
 
 ![Feed](docs/screenshots/feed-01.png)
 ![Immersive start](docs/screenshots/02-immersive-mid.png)
-![Immersive mid](docs/screenshots/03-immersive-mid.png)
 ![Immersive collapsed](docs/screenshots/04-immersive-end.png)
 
 [Demo video](docs/demo/immersive-walkthrough.mp4)
