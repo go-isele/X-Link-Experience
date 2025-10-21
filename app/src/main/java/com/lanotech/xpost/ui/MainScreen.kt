@@ -1,8 +1,6 @@
 package com.lanotech.xpost.ui
 
 import android.annotation.SuppressLint
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,87 +19,68 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CornerSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import com.lanotech.xpost.R
+import com.lanotech.xpost.data.PostData
+import com.lanotech.xpost.data.samplePosts
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
-
-@SuppressLint("SetJavaScriptEnabled")
-@Composable
-fun ScrollAwareWebView(
-    url: String,
-    scrollYFlow: MutableStateFlow<Float>
-) {
-    val context = LocalContext.current
-    // Use a key to reset WebView when the URL changes (e.g., when the post is re-selected)
-    AndroidView(
-        factory = {
-            WebView(context).apply {
-                settings.javaScriptEnabled = true
-                webViewClient = WebViewClient()
-                setOnScrollChangeListener { _, _, scrollY, _, _ ->
-                    // Emit scroll position
-                    scrollYFlow.value = scrollY.toFloat()
-                }
-                loadUrl(url)
-            }
-        },
-        modifier = Modifier.fillMaxSize()
-    )
-}
 
 
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen() {
-    var selectedPost by remember { mutableStateOf<String?>(null) }
+    var selectedPost by remember { mutableStateOf<PostData?>(null) }
     var showWebView by remember { mutableStateOf(false) }
 
     // Use a key to ensure a new flow is created and reset when a new post is selected
     val scrollYFlow = remember(selectedPost) { MutableStateFlow(0f) }
 
     // track web scroll
-    var scrollY by remember { mutableStateOf(0f) }
+    var scrollY by remember { mutableFloatStateOf(0f) }
     val maxScrollForMinimize = 600f // Scroll distance to achieve full minimization
 
     // Define card size limits
     val toolbarOnlyHeight = 80.dp  // when fully immersed
     val minCardHeight = toolbarOnlyHeight
-    val maxHeight = 346.dp
+    val maxHeight = 306.dp
+
+    var measuredContentHeight by remember { mutableStateOf(maxHeight) }
 
 
     // **FIXED VALUE**: Maximum distance the card should slide UP (negative offset)
@@ -135,7 +114,7 @@ fun MainScreen() {
     // **FIXED LOGIC**: Use .toFloat() and Dp arithmetic
     val cardHeight by animateDpAsState(
         targetValue = if (progress >= 0.95f) toolbarOnlyHeight
-        else maxHeight - (maxHeight - toolbarOnlyHeight) * progress,
+        else measuredContentHeight - (measuredContentHeight - toolbarOnlyHeight) * progress,
         label = "heightAnim"
     )
 
@@ -166,6 +145,8 @@ fun MainScreen() {
         label = "cornerAnim"
     )
 
+    var loadingProgress by remember { mutableIntStateOf(0) }
+
     // Determine visibility states based on progress
     val isPartiallyImmersedOrExpanded = progress < 0.9f
     val isFullyExpanded = progress < 0.2f
@@ -174,6 +155,8 @@ fun MainScreen() {
     // Box and content structure remain as in the previous fix
     // ...
     Box(modifier = Modifier.fillMaxSize()) {
+        // Feed list
+        // In MainScreen:
         // 📰 Feed list
         if (!showWebView) {
             LazyColumn(
@@ -181,26 +164,76 @@ fun MainScreen() {
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(10) {
+                // 👇 UPDATE 1: Iterate over the samplePosts list
+                items(samplePosts, key = { it.id }) { post ->
                     PostCard(
-                        onLinkClick = {
-                            selectedPost = "https://docs.x.com/overview"
+                        post = post, // Pass the PostData object
+                        onLinkClick = { url ->
+                            selectedPost = post
                             showWebView = true
-                        }
+                        },
+                        isSelected = selectedPost?.id == post.id
                     )
                 }
             }
         }
+// ...
 
         // 🌐 WebView
         if (showWebView && selectedPost != null) {
-            ScrollAwareWebView(url = selectedPost!!, scrollYFlow = scrollYFlow)
+            // 👇 FIX: Assign the delegated property to a local variable to enable smart cast
+            val post = selectedPost
+
+            if (loadingProgress < 100) {
+                LinearProgressIndicator(
+                    progress = { loadingProgress / 100f },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.TopCenter)
+                        .zIndex(5f) // Ensure it's above everything
+                )
+            }
+
+            post?.url?.let { url ->
+                ScrollAwareWebView(
+                    url = url,
+                    scrollYFlow = scrollYFlow,
+                    onProgressChange = { loadingProgress = it }
+                )
+            }
+        }
+
+        // Measurement for content height
+        val configuration = LocalConfiguration.current
+        if (selectedPost != null) {
+            Column(
+                modifier = Modifier
+                    .offset(x = (-configuration.screenWidthDp - 100).dp)
+                    .alpha(0f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .onGloballyPositioned { coordinates ->
+                        measuredContentHeight = coordinates.size.height.dp.coerceIn(minCardHeight, maxHeight)
+                    }
+            ) {
+                PostProfileRow(
+                    userName = selectedPost!!.userName,
+                    userHandle = selectedPost!!.userHandle,
+                    time = selectedPost!!.time,
+                    modifier = Modifier
+                        .padding(top = 16.dp)
+                )
+                PostTextContent(
+                    text = selectedPost!!.content,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                PostBottomToolbar()
+            }
         }
 
         // 🧩 Floating post (bottom sheet card)
         if (selectedPost != null) {
             // 🚀 Transparent Floating Header (Control Bar) - Z-INDEX 3
-            // The position is controlled dynamically to appear when card minimizes.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -212,7 +245,7 @@ fun MainScreen() {
                     .height(controlBarHeight)
             ) {
                 FloatingControlBar(
-                    url = selectedPost!!, // Pass the current URL
+                    url = selectedPost!!.url ?: "", // Pass the current URL
                     onClose = {
                         showWebView = false
                         selectedPost = null
@@ -245,37 +278,74 @@ fun MainScreen() {
                     .background(MaterialTheme.colorScheme.surface)
                     .height(cardHeight)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp)
-                ) {
-                    // --- 1. Profile Row (Visible unless fully collapsed) ---
-                    if (isPartiallyImmersedOrExpanded) {
-                        PostProfileRow(modifier = Modifier.padding(top = 16.dp))
-                    } else {
-                        // Ensure some space is taken up when fully collapsed if needed
-                        Spacer(modifier = Modifier.height(16.dp))
-                    }
+                selectedPost?.let { post ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .padding(horizontal = 16.dp)
 
-                    // --- 2. Post Content (Shrinks/Hides) ---
-                    if (isFullyExpanded) { // Show full content only when fully expanded
-                        PostTextContent(
-                            text = "Urgently looking for an interior designer and architectural designer to work for Ayiks Construction Ltd. Starting Salary Ksh 100,000.\n\nQualification: Must have a master's degree in architecture.\n\nMungu Mbele.",
-                            modifier = Modifier.padding(top = 8.dp).weight(1f)
-                        )
-                    } else if (isPartiallyImmersedOrExpanded) { // Show one line with 'Show more' implied
-                        Text(
-                            text = "Urgently looking for an interior designer and architectural designer to work for Ayiks Construction Ltd. Starting Salary Ksh 100,000.",
-                            maxLines = 1,
-                            fontSize = 15.sp,
-                            modifier = Modifier.padding(top = 8.dp).weight(1f)
-                        )
-                    } else {
-                        Spacer(modifier = Modifier.weight(1f))
+                    ) {
+                        // --- 1. Profile Row (Visible unless fully collapsed) ---
+                        if (isPartiallyImmersedOrExpanded) {
+                            val profileAlpha = (1f - progress * 2f).coerceIn(0.2f, 1f) // Fade out faster
+                            val profileScale = (1f - progress * 0.2f).coerceIn(0.8f, 1f) // Slight shrink
+
+                            PostProfileRow(
+                                userName = post.userName,
+                                userHandle = post.userHandle,
+                                time = post.time,
+                                modifier = Modifier
+                                    .padding(top = 16.dp)
+                                    .graphicsLayer(
+                                        alpha = profileAlpha,
+                                        scaleX = profileScale,
+                                        scaleY = profileScale,
+                                        transformOrigin = TransformOrigin(0f, 0f)
+                                    )
+                            )
+                        } else {
+                            // Ensure some space is taken up when fully collapsed if needed
+                            Spacer(modifier = Modifier.height(16.dp))
+                        }
+
+                        // --- 2. Post Content (Shrinks/Hides) ---
+                        if (isFullyExpanded) { // Show full content only when fully expanded
+                            PostTextContent(
+                                text = post.content,
+                                modifier = Modifier.padding(top = 8.dp).weight(1f)
+                            )
+                        } else if (isPartiallyImmersedOrExpanded) { // Show one line with 'Show more' implied
+                            Row(
+                                modifier = Modifier
+                                    .padding(top = 8.dp)
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    // Use the actual post content
+                                    text = post.content.substringBefore('\n').substringBefore('.') + if (post.content.contains(' ')) "..." else "",
+                                    maxLines = 1,
+                                    fontSize = 15.sp,
+                                    overflow = TextOverflow.Ellipsis, // Ensure it truncates if too long
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+
+                                Text(
+                                    text = " Show More", // Added a space for separation
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier
+                                        .clickable { /* Handle click to fully expand the card if needed, or simply read the text */ }
+                                        .padding(start = 4.dp)
+                                )
+                            }
+                        } else {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
+                        PostBottomToolbar()
                     }
-                    PostBottomToolbar()
-                    Spacer(modifier = Modifier.height(4.dp))
                 }
             }
         }
@@ -412,135 +482,6 @@ fun FloatingControlBar(
             }
         } else {
             Spacer(modifier = Modifier.width(96.dp))
-        }
-    }
-}
-
-
-
-@Composable
-fun PostCard(onLinkClick: () -> Unit, modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        elevation = CardDefaults.cardElevation(3.dp)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            PostProfileRow()
-            Spacer(modifier = Modifier.height(10.dp))
-            PostTextContent(
-                text = "Urgently looking for an interior designer and architectural designer to work for Ayiks Construction Ltd. Starting Salary Ksh 100,000.\n\nQualification: Must have a master's degree in architecture.\n\nMungu Mbele."
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "https://docs.x.com/overview",
-                color = MaterialTheme.colorScheme.primary,
-                fontSize = 14.sp,
-                modifier = Modifier.clickable { onLinkClick() }
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            PostBottomToolbar()
-        }
-    }
-}
-
-@Composable
-fun PostProfileRow(modifier: Modifier = Modifier) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        // Use Arrangement.SpaceBetween to push action items to the end
-        horizontalArrangement = Arrangement.SpaceBetween,
-        modifier = modifier.fillMaxWidth()
-    ) {
-        // --- 1. Profile Image and Text (Grouped) ---
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            // Use Modifier.weight(1f) to allow the profile area to take up available space
-            // and push the actions to the right edge.
-            modifier = Modifier.weight(1f)
-        ) {
-            // Profile Image
-            Icon(
-                painter = painterResource(id = R.drawable.ic_launcher_foreground), // Placeholder
-                contentDescription = "Profile",
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(androidx.compose.foundation.shape.CircleShape)
-                    .background(Color.Gray),
-                tint = Color.White
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-
-            // User Text Details
-            Column {
-                Text("Peter Muli", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                Text(
-                    text = "@peter_mullih · 1h",
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                    fontSize = 13.sp
-                )
-            }
-        }
-
-        // --- 2. Action Buttons (Pushed to the end) ---
-        Row(verticalAlignment = Alignment.CenterVertically) {
-
-            // Follow Button
-            Button(
-                onClick = { /* Handle Follow action */ },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                ),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                modifier = Modifier.height(36.dp)
-            ) {
-                Text("Follow", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            }
-
-            // MoreVert Icon
-            IconButton(onClick = { /* Handle More actions */ }) {
-                Icon(
-                    Icons.Default.MoreVert,
-                    contentDescription = "More options",
-                    tint = MaterialTheme.colorScheme.onSurface
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun PostTextContent(text: String, modifier: Modifier = Modifier) {
-    Text(
-        text = text,
-        fontSize = 15.sp,
-        lineHeight = 20.sp,
-        modifier = modifier
-    )
-}
-
-@Composable
-fun PostBottomToolbar(modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceAround,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        // Icons using your R.drawable references
-        IconButton(onClick = { /* Comment */ }) {
-            Icon(painter = painterResource(id = R.drawable.outline_chat), contentDescription = "Comment")
-        }
-        IconButton(onClick = { /* Share */ }) {
-            Icon(painter = painterResource(id = R.drawable.outline_cycle), contentDescription = "Share")
-        }
-        IconButton(onClick = { /* Like */ }) {
-            Icon(painter = painterResource(id = R.drawable.outline_heart), contentDescription = "Like")
-        }
-        IconButton(onClick = { /* Bookmark */ }) {
-            Icon(painter = painterResource(id = R.drawable.outline_bookmark), contentDescription = "Bookmark")
-        }
-        IconButton(onClick = { /* Share */ }) {
-            Icon(painter = painterResource(id = R.drawable.outline_share), contentDescription = "Share")
         }
     }
 }
